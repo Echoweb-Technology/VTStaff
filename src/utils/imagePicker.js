@@ -1,0 +1,53 @@
+/**
+ * Pick image from camera or gallery and optionally resize (e.g. max width 1024, quality 0.7).
+ */
+
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
+import ImageResizer from '@bam.tech/react-native-image-resizer';
+
+const RESIZE_WIDTH = 1024;
+const QUALITY = 70;
+
+export function pickImageOptions() {
+  return {
+    mediaType: 'photo',
+    includeBase64: false,
+    saveToPhotos: false,
+  };
+}
+
+/**
+ * Open camera or gallery. Returns { uri } or null if cancelled.
+ */
+export async function pickImageFromCamera() {
+  const result = await launchCamera(pickImageOptions());
+  if (result.didCancel || result.errorCode || !result.assets?.[0]?.uri) {
+    return null;
+  }
+  return { uri: result.assets[0].uri };
+}
+
+export async function pickImageFromGallery() {
+  const result = await launchImageLibrary(pickImageOptions());
+  if (result.didCancel || result.errorCode || !result.assets?.[0]?.uri) {
+    return null;
+  }
+  return { uri: result.assets[0].uri };
+}
+
+/**
+ * Resize image at uri to max width 1024 and quality 70. Returns path to resized file (uri).
+ */
+export async function resizeImage(uri) {
+  const res = await ImageResizer.createResizedImage(
+    uri,
+    RESIZE_WIDTH,
+    9999,
+    'JPEG',
+    QUALITY,
+    0,
+    undefined,
+    false
+  );
+  return res.uri;
+}
