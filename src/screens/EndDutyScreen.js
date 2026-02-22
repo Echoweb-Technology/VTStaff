@@ -26,6 +26,15 @@ export default function EndDutyScreen({ route, navigation }) {
   const [photoUri, setPhotoUri] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const handleImagePick = async (pickerFn) => {
+    try {
+      const result = await pickerFn();
+      if (result?.uri) setPhotoUri(result.uri);
+    } catch (e) {
+      Alert.alert('Camera', e.message || 'Failed to get photo.');
+    }
+  };
+
   const showImageOptions = () => {
     const options = ['Take Photo', 'Choose from Gallery', 'Cancel'];
     const cancelIndex = 2;
@@ -34,11 +43,9 @@ export default function EndDutyScreen({ route, navigation }) {
         { options, cancelButtonIndex: cancelIndex },
         async (i) => {
           if (i === 0) {
-            const result = await pickImageFromCamera();
-            if (result?.uri) setPhotoUri(result.uri);
+            await handleImagePick(pickImageFromCamera);
           } else if (i === 1) {
-            const result = await pickImageFromGallery();
-            if (result?.uri) setPhotoUri(result.uri);
+            await handleImagePick(pickImageFromGallery);
           }
         }
       );
@@ -46,12 +53,10 @@ export default function EndDutyScreen({ route, navigation }) {
       Alert.alert('End odometer photo', '', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Take Photo', onPress: async () => {
-          const result = await pickImageFromCamera();
-          if (result?.uri) setPhotoUri(result.uri);
+          await handleImagePick(pickImageFromCamera);
         }},
         { text: 'Choose from Gallery', onPress: async () => {
-          const result = await pickImageFromGallery();
-          if (result?.uri) setPhotoUri(result.uri);
+          await handleImagePick(pickImageFromGallery);
         }},
       ]);
     }
