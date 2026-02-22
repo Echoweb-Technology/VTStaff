@@ -4,6 +4,7 @@
 
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import ImageResizer from '@bam.tech/react-native-image-resizer';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 const RESIZE_WIDTH = 1024;
 const QUALITY = 70;
@@ -16,12 +17,38 @@ export function pickImageOptions() {
   };
 }
 
+async function ensureCameraPermission() {
+  if (Platform.OS !== 'android') return true;
+
+  const granted = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.CAMERA,
+    {
+      title: 'Camera permission',
+      message: 'VTStaff needs camera access to capture odometer photos.',
+      buttonPositive: 'OK',
+    }
+  );
+
+  return granted === PermissionsAndroid.RESULTS.GRANTED;
+}
+
 /**
  * Open camera or gallery. Returns { uri } or null if cancelled.
  */
 export async function pickImageFromCamera() {
+  const hasPermission = await ensureCameraPermission();
+  if (!hasPermission) {
+    throw new Error('Camera permission denied. Please allow camera access from app settings.');
+  }
+
   const result = await launchCamera(pickImageOptions());
-  if (result.didCancel || result.errorCode || !result.assets?.[0]?.uri) {
+  if (result.didCancel) {
+    return null;
+  }
+  if (result.errorCode) {
+    throw new Error(result.errorMessage || 'Unable to open camera.');
+  }
+  if (!result.assets?.[0]?.uri) {
     return null;
   }
   return { uri: result.assets[0].uri };
@@ -29,7 +56,13 @@ export async function pickImageFromCamera() {
 
 export async function pickImageFromGallery() {
   const result = await launchImageLibrary(pickImageOptions());
-  if (result.didCancel || result.errorCode || !result.assets?.[0]?.uri) {
+  if (result.didCancel) {
+    return null;
+  }
+  if (result.errorCode) {
+    throw new Error(result.errorMessage || 'Unable to open gallery.');
+  }
+  if (!result.assets?.[0]?.uri) {
     return null;
   }
   return { uri: result.assets[0].uri };
