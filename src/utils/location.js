@@ -1,12 +1,13 @@
 /**
- * Get current position (expo-location style API using @react-native-community/geolocation).
- * Request permission first; returns { latitude, longitude } or throws.
+ * Location helpers using @react-native-community/geolocation.
+ * - Requests runtime permission
+ * - Tries high accuracy first, then falls back to balanced accuracy
  */
 
 import { Platform } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
 
-export async function getCurrentPositionAsync() {
+function getCurrentPosition(options) {
   return new Promise((resolve, reject) => {
     Geolocation.getCurrentPosition(
       (position) => {
@@ -15,10 +16,33 @@ export async function getCurrentPositionAsync() {
           longitude: position.coords.longitude,
         });
       },
-      (err) => reject(new Error(err.message || 'Unable to get location')),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      (err) => reject(new Error(err?.message || 'Unable to get location')),
+      options
     );
   });
+}
+
+export async function getCurrentPositionAsync() {
+  try {
+    return await getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 10000,
+      distanceFilter: 0,
+      forceRequestLocation: true,
+      showLocationDialog: true,
+    });
+  } catch (_err) {
+    // Fallback for devices where GPS fix takes too long indoors/with weak signal.
+    return getCurrentPosition({
+      enableHighAccuracy: false,
+      timeout: 15000,
+      maximumAge: 60000,
+      distanceFilter: 0,
+      forceRequestLocation: true,
+      showLocationDialog: true,
+    });
+  }
 }
 
 /**
@@ -27,10 +51,19 @@ export async function getCurrentPositionAsync() {
 export async function requestLocationPermissionAsync() {
   if (Platform.OS === 'android') {
     const { PermissionsAndroid } = require('react-native');
-    const granted = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-    );
-    return granted === PermissionsAndroid.RESULTS.GRANTED;
+    const result = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+    ]);
+
+    const fineGranted =
+      result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
+      PermissionsAndroid.RESULTS.GRANTED;
+    const coarseGranted =
+      result[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
+      PermissionsAndroid.RESULTS.GRANTED;
+
+    return fineGranted || coarseGranted;
   }
 
   if (Platform.OS === 'ios') {
