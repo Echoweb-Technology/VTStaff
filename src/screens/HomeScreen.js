@@ -86,7 +86,10 @@ export default function HomeScreen({ navigation }) {
           text: 'Yes, Start',
           onPress: async () => {
             try {
-              await requestLocationPermissionAsync();
+              const hasPermission = await requestLocationPermissionAsync();
+              if (!hasPermission) {
+                throw new Error('Location permission denied. Please allow location access from app settings.');
+              }
               const coords = await getCurrentPositionAsync();
               navigation.navigate('StartDuty', {
                 bookingId: booking.booking_id,
@@ -114,7 +117,10 @@ export default function HomeScreen({ navigation }) {
           text: 'Yes, End',
           onPress: async () => {
             try {
-              await requestLocationPermissionAsync();
+              const hasPermission = await requestLocationPermissionAsync();
+              if (!hasPermission) {
+                throw new Error('Location permission denied. Please allow location access from app settings.');
+              }
               const coords = await getCurrentPositionAsync();
               navigation.navigate('EndDuty', {
                 endLatitude: String(coords.latitude),
