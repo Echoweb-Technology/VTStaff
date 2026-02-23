@@ -22,14 +22,21 @@ export async function getCurrentPositionAsync() {
 }
 
 /**
- * Request location permission (Android). iOS uses Info.plist usage description.
- * On Android you may need to use PermissionsAndroid before calling getCurrentPositionAsync.
+ * Request location permission before reading current location.
  */
 export async function requestLocationPermissionAsync() {
-  if (Platform.OS !== 'android') return true;
-  const { PermissionsAndroid } = require('react-native');
-  const granted = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-  );
-  return granted === PermissionsAndroid.RESULTS.GRANTED;
+  if (Platform.OS === 'android') {
+    const { PermissionsAndroid } = require('react-native');
+    const granted = await PermissionsAndroid.request(
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+    );
+    return granted === PermissionsAndroid.RESULTS.GRANTED;
+  }
+
+  if (Platform.OS === 'ios') {
+    const status = await Geolocation.requestAuthorization('whenInUse');
+    return status === 'granted';
+  }
+
+  return true;
 }

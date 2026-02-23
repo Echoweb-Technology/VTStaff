@@ -35,7 +35,7 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>VTStaff needs location access to capture start and end duty location.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>VTStaff needs camera access to capture odometer photos for start and end duty.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
