@@ -8,9 +8,11 @@ import com.facebook.react.ReactPackage;
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint;
 import com.facebook.react.defaults.DefaultReactNativeHost;
 import com.facebook.soloader.SoLoader;
+import android.util.Log;
 import java.util.List;
 
 public class MainApplication extends Application implements ReactApplication {
+  private static final String TAG = "MainApplication";
 
   private final ReactNativeHost mReactNativeHost =
       new DefaultReactNativeHost(this) {
@@ -55,7 +57,11 @@ public class MainApplication extends Application implements ReactApplication {
     if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
       // If you opted-in for the New Architecture, we load the native entry point for
       // this app.
-      DefaultNewArchitectureEntryPoint.load();
+      try {
+        DefaultNewArchitectureEntryPoint.load();
+      } catch (UnsatisfiedLinkError error) {
+        Log.e(TAG, "New architecture native libs missing. Starting with old architecture.", error);
+      }
     }
     // ReactNativeFlipper.initializeFlipper(this,
     // getReactNativeHost().getReactInstanceManager());
