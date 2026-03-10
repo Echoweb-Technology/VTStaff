@@ -12,13 +12,16 @@ import {
   ScrollView,
   Image,
   ActivityIndicator,
-  Alert,
   RefreshControl,
+  Linking,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { getDriverStatus } from '../services/driverApi';
+import AwesomeAlert from 'react-native-awesome-alerts';
+import { getDriverStatus, getDashboardSlider } from '../services/driverApi';
 import { requestLocationPermissionAsync, getCurrentPositionAsync } from '../utils/location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -29,15 +32,54 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [status, setStatus] = useState(null);
+  const [sliderData, setSliderData] = useState(null);
+  const [activeSlide, setActiveSlide] = useState(0);
+
+  const screenWidth = Dimensions.get('window').width;
+
+  // AwesomeAlert state
+  const [alertConfig, setAlertConfig] = useState({
+    visible: false,
+    title: '',
+    message: '',
+    showCancel: true,
+    cancelText: 'Cancel / रद्द करें',
+    confirmText: 'OK',
+    confirmColor: '#34C759',
+    onConfirm: () => { },
+  });
+
+  const showAlert = (config) => {
+    setAlertConfig({ ...alertConfig, showCancel: true, cancelText: 'Cancel / रद्द करें', ...config, visible: true });
+  };
+  const hideAlert = () => setAlertConfig({ ...alertConfig, visible: false });
 
   const fetchStatus = useCallback(async (showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
     else setLoading(true);
     setError('');
+
     try {
-      const res = await getDriverStatus();
-      const data = res.data ?? res;
-      setStatus(data);
+      // Run both API calls concurrently
+      const [statusRes, sliderRes] = await Promise.allSettled([
+        getDriverStatus(),
+        getDashboardSlider()
+      ]);
+
+      if (statusRes.status === 'fulfilled') {
+        const data = statusRes.value.data ?? statusRes.value;
+        setStatus(data);
+      } else {
+        throw new Error(statusRes.reason?.message || 'Failed to load status');
+      }
+
+      if (sliderRes.status === 'fulfilled') {
+        const sData = sliderRes.value.data ?? sliderRes.value;
+        setSliderData(sData);
+      } else {
+        console.warn('Slider fetch failed:', sliderRes.reason);
+        // We don't fail the whole screen if just the slider fails
+      }
     } catch (e) {
       setError(e.message || 'Failed to load status');
       setStatus(null);
@@ -55,11 +97,59 @@ export default function HomeScreen({ navigation }) {
 
   const onRefresh = () => fetchStatus(true);
 
+  const handleLogout = async () => {
+    showAlert({
+      title: 'Logout / लॉग आउट',
+      message: 'Are you sure you want to logout? / क्या आप वाकई लॉग आउट करना चाहते हैं?',
+      confirmText: 'Logout / लॉग आउट',
+      confirmColor: '#d32f2f',
+      onConfirm: async () => {
+        hideAlert();
+        try {
+          await AsyncStorage.removeItem('@vtstaff_jwt_token');
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }],
+          });
+        } catch (e) {
+          setTimeout(() => {
+            showAlert({
+              title: 'Logout Failed / लॉगआउट विफल',
+              message: 'An error occurred while logging out. / लॉगआउट करते समय कोई त्रुटि हुई।',
+              showCancel: false,
+              confirmText: 'OK / ठीक है',
+              onConfirm: hideAlert
+            });
+          }, 500);
+        }
+      },
+    });
+  };
+
   const dutyStatus = status?.duty_status ?? 'off_duty';
   const hasVehicle = status?.has_vehicle ?? false;
+  const bookingStatus = status?.booking_status ?? 'not_available';
   const booking = status?.booking ?? null;
   const duration = status?.duration ?? 0;
   const vehicleDetails = status?.vehicle_details ?? null;
+
+  const handoverImage = sliderData?.handover?.front_image;
+  const driverInfo = sliderData?.driver;
+
+  // Conditionally build slides array
+  const slides = [];
+  if (handoverImage) {
+    slides.push({ type: 'handover' });
+  }
+  if (driverInfo) {
+    slides.push({ type: 'driver' });
+  }
+
+  const handleScroll = (event) => {
+    const slideSize = event.nativeEvent.layoutMeasurement.width;
+    const index = Math.round(event.nativeEvent.contentOffset.x / slideSize);
+    setActiveSlide(index);
+  };
 
   const formatDuration = (seconds) => {
     if (!seconds || seconds <= 0) return '0h 0m';
@@ -70,76 +160,113 @@ export default function HomeScreen({ navigation }) {
 
   const handleStartDuty = () => {
     if (!hasVehicle) {
-      Alert.alert('Cannot start duty', 'No vehicle assigned. Please contact supervisor.');
+      showAlert({
+        title: 'Cannot start duty / ड्यूटी शुरू नहीं कर सकते',
+        message: 'No vehicle assigned. Please contact operations. / कोई वाहन नहीं दिया गया है। कृपया संचालन (ऑपरेशंस) से संपर्क करें।',
+        showCancel: false,
+        confirmText: 'OK / ठीक है',
+        onConfirm: hideAlert
+      });
       return;
     }
-    if (!booking?.booking_id) {
-      Alert.alert('No Duty Assigned!', 'You do not have a booking assigned. Please contact supervisor.');
-      return;
-    }
-    Alert.alert(
-      'Start Duty',
-      'Are you sure you want to start duty? You will need to enter odometer reading and take a photo.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, Start',
-          onPress: async () => {
-            try {
-              const hasPermission = await requestLocationPermissionAsync();
-              if (!hasPermission) {
-                throw new Error('Location permission denied. Please allow location access from app settings.');
-              }
-              const coords = await getCurrentPositionAsync();
-              navigation.navigate('StartDuty', {
-                bookingId: booking.booking_id,
-                userName: booking.user_name || '',
-                userPhoneNo: String(booking.user_phone ?? ''),
-                startLatitude: String(coords.latitude),
-                startLongitude: String(coords.longitude),
-              });
-            } catch (e) {
-              Alert.alert('Location required', e.message || 'Please enable location and try again.');
-            }
-          },
-        },
-      ]
-    );
+
+    showAlert({
+      title: 'Start Duty / ड्यूटी शुरू करें',
+      message: 'Are you sure you want to start duty? You will need to enter odometer reading and take a photo. / क्या आप वाकई ड्यूटी शुरू करना चाहते हैं? आपको ओडोमीटर रीडिंग दर्ज करनी होगी और एक फोटो लेनी होगी।',
+      confirmText: 'Yes, Start / हाँ, शुरू करें',
+      confirmColor: '#34C759',
+      onConfirm: async () => {
+        hideAlert();
+        try {
+          const hasPermission = await requestLocationPermissionAsync();
+          if (!hasPermission) {
+            throw new Error('Location permission denied. / स्थान की अनुमति अस्वीकार कर दी गई है।');
+          }
+          const coords = await getCurrentPositionAsync();
+          navigation.navigate('StartDuty', {
+            bookingId: booking?.booking_id || '',
+            userName: booking?.user_name || '',
+            userPhoneNo: String(booking?.user_phone ?? ''),
+            startLatitude: String(coords.latitude),
+            startLongitude: String(coords.longitude),
+          });
+        } catch (e) {
+          setTimeout(() => {
+            showAlert({
+              title: 'Location required / लोकेशन आवश्यक है',
+              message: e.message || 'Please enable location and try again. / कृपया लोकेशन सक्षम करें और पुनः प्रयास करें।',
+              showCancel: false,
+              confirmText: 'OK / ठीक है',
+              onConfirm: hideAlert
+            });
+          }, 500);
+        }
+      }
+    });
   };
 
   const handleEndDuty = () => {
-    Alert.alert(
-      'End Duty',
-      'Are you sure you want to end duty? You will need to enter end odometer reading and take a photo.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, End',
-          onPress: async () => {
-            try {
-              const hasPermission = await requestLocationPermissionAsync();
-              if (!hasPermission) {
-                throw new Error('Location permission denied. Please allow location access from app settings.');
-              }
-              const coords = await getCurrentPositionAsync();
-              navigation.navigate('EndDuty', {
-                endLatitude: String(coords.latitude),
-                endLongitude: String(coords.longitude),
-              });
-            } catch (e) {
-              Alert.alert('Location required', e.message || 'Please enable location and try again.');
-            }
-          },
-        },
-      ]
-    );
+    showAlert({
+      title: 'End Duty / ड्यूटी समाप्त करें',
+      message: 'Are you sure you want to end duty? You will need to enter end odometer reading and take a photo. / क्या आप वाकई ड्यूटी समाप्त करना चाहते हैं? आपको अंतिम ओडोमीटर रीडिंग दर्ज करनी होगी और एक फोटो लेनी होगी।',
+      confirmText: 'Yes, End / हाँ, समाप्त करें',
+      confirmColor: '#FF3B30',
+      onConfirm: async () => {
+        hideAlert();
+        try {
+          const hasPermission = await requestLocationPermissionAsync();
+          if (!hasPermission) {
+            throw new Error('Location permission denied. / स्थान की अनुमति अस्वीकार कर दी गई है।');
+          }
+          const coords = await getCurrentPositionAsync();
+          navigation.navigate('EndDuty', {
+            endLatitude: String(coords.latitude),
+            endLongitude: String(coords.longitude),
+          });
+          console.log('coords', coords);
+        } catch (e) {
+          setTimeout(() => {
+            showAlert({
+              title: 'Location required / लोकेशन आवश्यक है',
+              message: e.message || 'Please enable location and try again. / कृपया लोकेशन चालू करें और पुनः प्रयास करें।',
+              showCancel: false,
+              confirmText: 'OK / ठीक है',
+              onConfirm: hideAlert
+            });
+          }, 500);
+        }
+      }
+    });
+  };
+
+  const handleAddFuel = () => {
+    if (!hasVehicle) {
+      showAlert({
+        title: 'Cannot Add Fuel / ईंधन नहीं भर सकते',
+        message: 'No vehicle assigned. Please contact operations. / कोई वाहन नहीं दिया गया है। कृपया संचालन (ऑपरेशंस) से संपर्क करें।',
+        showCancel: false,
+        confirmText: 'OK / ठीक है',
+        onConfirm: hideAlert
+      });
+      return;
+    }
+
+    // From PHP logic, we need to pass previous odometer reading
+    // Let's assume duration/book status might have it, or we just pass 0 for now
+    // In a real app the API would provide the `prev_odo` from vehicle_details
+    navigation.navigate('AddFuel', {
+      bookingId: booking?.booking_id || '',
+      vehicleRegistration: driverInfo?.assigned_vehicle || vehicleDetails?.registration || '',
+      vehicleFuelType: driverInfo?.fuel_type || vehicleDetails?.vehicle_fuel_type || '',
+      prevOdometerReading: vehicleDetails?.prev_odo || 0,
+    });
   };
 
   if (loading && !status) {
     return (
       <View style={[styles.root, styles.centered]}>
         <ActivityIndicator size="large" color="#34C759" />
-        <Text style={styles.loadingText}>Loading...</Text>
+        <Text style={styles.loadingText}>Loading... / कृपया प्रतीक्षा करें...</Text>
       </View>
     );
   }
@@ -150,10 +277,8 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.logoContainer}>
           <Text style={styles.logoText}>VT</Text>
         </View>
-        <TouchableOpacity style={styles.menuButton} activeOpacity={0.7}>
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
-          <View style={styles.menuLine} />
+        <TouchableOpacity style={styles.logoutButton} activeOpacity={0.7} onPress={handleLogout}>
+          <Text style={styles.logoutText}>Logout / लॉग आउट</Text>
         </TouchableOpacity>
       </View>
 
@@ -174,74 +299,141 @@ export default function HomeScreen({ navigation }) {
           </View>
         ) : null}
 
-        <View style={styles.bannerCard}>
-          <Image
-            source={{
-              uri: 'https://images.pexels.com/photos/102104/pexels-photo-102104.jpeg?auto=compress&cs=tinysrgb&w=800',
-            }}
-            style={styles.bannerImage}
-            resizeMode="cover"
-          />
-          <View style={styles.bannerDots}>
-            <View style={[styles.dot, styles.dotActive]} />
-            <View style={styles.dot} />
-            <View style={styles.dot} />
+        {slides.length > 0 && (
+          <View style={styles.sliderContainer}>
+            <ScrollView
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              contentContainerStyle={{ alignItems: 'center' }}
+            >
+              {slides.map((slide, index) => {
+                if (slide.type === 'handover') {
+                  return (
+                    <View key={index} style={[styles.slideCard, { width: screenWidth - 32 }]}>
+                      <Image
+                        source={{ uri: handoverImage }}
+                        style={styles.bannerImage}
+                        resizeMode="cover"
+                      />
+                    </View>
+                  );
+                } else if (slide.type === 'driver') {
+                  const isActive = driverInfo.status === 'Active';
+                  return (
+                    <View key={index} style={[styles.slideCard, styles.driverCard, { width: screenWidth - 32 }]}>
+                      {driverInfo.driver_image ? (
+                        <Image source={{ uri: driverInfo.driver_image }} style={styles.driverImage} />
+                      ) : (
+                        <View style={styles.driverImagePlaceholder}>
+                          <Text style={styles.driverInitials}>
+                            {(driverInfo.driver_name || 'D')[0]}
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={styles.driverDetails}>
+                        <Text style={styles.driverName}>
+                          {driverInfo.driver_name || 'Unknown'}
+                          {driverInfo.driver_code ? ` (${driverInfo.driver_code})` : ''}
+                        </Text>
+                        <Text style={styles.driverVehicle}>
+                          Vehicle: {driverInfo.assigned_vehicle || 'None'}
+                        </Text>
+                        <View style={[styles.statusBadge, isActive ? styles.statusActive : styles.statusInactive]}>
+                          <Text style={styles.statusBadgeText}>{driverInfo.status || 'Unknown'}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                }
+                return null;
+              })}
+            </ScrollView>
+
+            <View style={styles.bannerDots}>
+              {slides.map((_, i) => (
+                <View key={i} style={[styles.dot, activeSlide === i && styles.dotActive]} />
+              ))}
+            </View>
           </View>
-        </View>
+        )}
 
         {/* Booking details */}
-        {booking && (
+        {bookingStatus === 'available' && booking ? (
           <View style={styles.bookingCard}>
-            <Text style={styles.bookingTitle}>Booking</Text>
-            <Text style={styles.bookingRow}>ID: {booking.booking_id}</Text>
-            <Text style={styles.bookingRow}>User: {booking.user_name || '–'}</Text>
-            <Text style={styles.bookingRow}>Phone: {booking.user_phone ?? '–'}</Text>
+            <View style={styles.bookingHeader}>
+              <Text style={styles.bookingTitle}>Booking Assigned / बुकिंग मिल गई</Text>
+              {booking.user_phone ? (
+                <TouchableOpacity
+                  style={styles.callButton}
+                  onPress={() => Linking.openURL(`tel:${booking.user_phone}`)}
+                >
+                  <Text style={styles.callButtonText}>📞 Call / कॉल करें</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <Text style={styles.bookingRow}>ID (आईडी): {booking.booking_id}</Text>
+            <Text style={styles.bookingRow}>User (यूज़र): {booking.user_name || '–'}</Text>
             {vehicleDetails?.registration && (
-              <Text style={styles.bookingRow}>Vehicle: {vehicleDetails.registration}</Text>
+              <Text style={styles.bookingRow}>Vehicle (वाहन): {vehicleDetails.registration}</Text>
+            )}
+          </View>
+        ) : (
+          <View style={styles.bookingCard}>
+            <Text style={styles.bookingTitle}>No Booking Assigned / कोई बुकिंग नहीं मिली</Text>
+            <Text style={styles.hintText}>You can still start duty. / आप फिर भी ड्यूटी शुरू कर सकते हैं।</Text>
+            {vehicleDetails?.registration && (
+              <Text style={styles.bookingRow}>Vehicle (वाहन): {vehicleDetails.registration}</Text>
             )}
           </View>
         )}
 
-        {/* Start / End duty buttons */}
-        <View style={styles.dutyRow}>
-          <TouchableOpacity
-            style={[
-              styles.dutyButton,
-              styles.startDuty,
-              (dutyStatus === 'on_duty' || !hasVehicle) && styles.dutyButtonDisabled,
-            ]}
-            onPress={handleStartDuty}
-            disabled={dutyStatus === 'on_duty' || !hasVehicle}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.dutyText}>Start Duty</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.dutyButton,
-              styles.endDuty,
-              dutyStatus === 'off_duty' && styles.dutyButtonDisabled,
-            ]}
-            onPress={handleEndDuty}
-            disabled={dutyStatus === 'off_duty'}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.dutyText}>End Duty</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Duty Section */}
+        {dutyStatus === 'off_duty' ? (
+          <View style={styles.dutyRow}>
+            <TouchableOpacity
+              style={[
+                styles.dutyButton,
+                styles.startDuty,
+                (!hasVehicle) && styles.dutyButtonDisabled,
+              ]}
+              onPress={handleStartDuty}
+              disabled={!hasVehicle}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.dutyText}>Start Duty / ड्यूटी शुरू करें</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.dutyRow}>
+            <TouchableOpacity
+              style={[
+                styles.dutyButton,
+                styles.endDuty,
+              ]}
+              onPress={handleEndDuty}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.dutyText}>End Duty / ड्यूटी समाप्त करें</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-        {!hasVehicle && dutyStatus === 'off_duty' && (
-          <Text style={styles.hintText}>No vehicle assigned. Start duty is disabled.</Text>
+        {!hasVehicle && (
+          <Text style={styles.hintText}>No vehicle assigned. Start duty is disabled. / कोई वाहन नहीं दिया गया है। ड्यूटी शुरू करना बंद है।</Text>
         )}
         {dutyStatus === 'on_duty' && (
-          <Text style={styles.durationText}>On duty: {formatDuration(duration)}</Text>
+          <Text style={styles.durationText}>On duty (ड्यूटी पर): {formatDuration(duration)}</Text>
         )}
 
-        <TouchableOpacity style={styles.card} activeOpacity={0.85}>
+        <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={handleAddFuel}>
           <View style={styles.cardIconCircle}>
             <Text style={styles.cardIconText}>⛽</Text>
           </View>
-          <Text style={styles.cardTitle}>Add Fuel</Text>
+          <Text style={styles.cardTitle}>Add Fuel / ईंधन भरें</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -249,14 +441,34 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.bottomNavInner}>
           <TouchableOpacity style={styles.navItem} activeOpacity={0.8}>
             <Text style={[styles.navIcon, styles.navIconActive]}>⌂</Text>
-            <Text style={[styles.navLabel, styles.navLabelActive]}>HOME</Text>
+            <Text style={[styles.navLabel, styles.navLabelActive]}>HOME / होम</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.navItem} activeOpacity={0.8}>
             <Text style={styles.navIcon}>⚙</Text>
-            <Text style={styles.navLabel}>SETTINGS</Text>
+            <Text style={styles.navLabel}>SETTINGS / सेटिंग्स</Text>
           </TouchableOpacity>
         </View>
       </View>
+
+      <AwesomeAlert
+        show={alertConfig.visible}
+        showProgress={false}
+        title={alertConfig.title}
+        message={alertConfig.message}
+        closeOnTouchOutside={true}
+        closeOnHardwareBackPress={false}
+        showCancelButton={alertConfig.showCancel}
+        showConfirmButton={true}
+        cancelText={alertConfig.cancelText}
+        confirmText={alertConfig.confirmText}
+        confirmButtonColor={alertConfig.confirmColor}
+        onCancelPressed={hideAlert}
+        onConfirmPressed={alertConfig.onConfirm}
+        titleStyle={styles.alertTitle}
+        messageStyle={styles.alertMessage}
+        cancelButtonTextStyle={styles.alertCancelText}
+        confirmButtonTextStyle={styles.alertConfirmText}
+      />
     </View>
   );
 }
@@ -311,17 +523,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#e53935',
   },
-  menuButton: {
-    width: 28,
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
+  logoutButton: {
     paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#ffeaeb',
+    borderRadius: 6,
   },
-  menuLine: {
-    height: 2,
-    backgroundColor: '#333',
-    borderRadius: 1,
-    width: 22,
+  logoutText: {
+    color: '#d32f2f',
+    fontSize: 14,
+    fontWeight: '600',
   },
   content: {
     flex: 1,
@@ -331,31 +542,92 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 16,
   },
-  bannerCard: {
+  sliderContainer: {
+    marginBottom: 16,
+  },
+  slideCard: {
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#ddd',
-    marginBottom: 16,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    height: 180,
+  },
+  driverCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  driverImage: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: '#eee',
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+  },
+  driverImagePlaceholder: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  driverInitials: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  driverDetails: {
+    marginLeft: 16,
+    flex: 1,
+    justifyContent: 'center',
+  },
+  driverName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#333',
+    marginBottom: 4,
+  },
+  driverVehicle: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  statusBadge: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+  },
+  statusActive: {
+    backgroundColor: '#e8f5e9',
+  },
+  statusInactive: {
+    backgroundColor: '#ffebee',
+  },
+  statusBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#333',
   },
   bannerImage: {
     width: '100%',
-    height: 180,
+    height: '100%',
   },
   bannerDots: {
-    position: 'absolute',
-    bottom: 10,
-    left: 0,
-    right: 0,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     gap: 6,
+    marginTop: 8,
   },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.6)',
+    backgroundColor: '#ccc',
   },
   dotActive: {
     width: 10,
@@ -376,6 +648,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#333',
     marginBottom: 8,
+  },
+  bookingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  callButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  callButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
   },
   bookingRow: {
     fontSize: 14,
@@ -486,5 +775,25 @@ const styles = StyleSheet.create({
   },
   navLabelActive: {
     color: '#007AFF',
+  },
+  alertTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+    textAlign: 'center',
+  },
+  alertMessage: {
+    fontSize: 16,
+    color: '#555',
+    textAlign: 'center',
+    marginVertical: 8,
+  },
+  alertCancelText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  alertConfirmText: {
+    fontSize: 15,
+    fontWeight: '600',
   },
 });

@@ -17,7 +17,7 @@ import {
   Platform,
 } from 'react-native';
 import { startDuty } from '../services/driverApi';
-import { pickImageFromCamera, pickImageFromGallery, resizeImage } from '../utils/imagePicker';
+import { pickImageFromCamera, resizeImage } from '../utils/imagePicker';
 
 export default function StartDutyScreen({ route, navigation }) {
   const {
@@ -41,31 +41,8 @@ export default function StartDutyScreen({ route, navigation }) {
     }
   };
 
-  const showImageOptions = () => {
-    const options = ['Take Photo', 'Choose from Gallery', 'Cancel'];
-    const cancelIndex = 2;
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: cancelIndex },
-        async (i) => {
-          if (i === 0) {
-            await handleImagePick(pickImageFromCamera);
-          } else if (i === 1) {
-            await handleImagePick(pickImageFromGallery);
-          }
-        }
-      );
-    } else {
-      Alert.alert('Meter photo', '', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Take Photo', onPress: async () => {
-          await handleImagePick(pickImageFromCamera);
-        }},
-        { text: 'Choose from Gallery', onPress: async () => {
-          await handleImagePick(pickImageFromGallery);
-        }},
-      ]);
-    }
+  const showImageOptions = async () => {
+    await handleImagePick(pickImageFromCamera);
   };
 
   const handleSubmit = async () => {
@@ -127,7 +104,7 @@ export default function StartDutyScreen({ route, navigation }) {
 
       <Text style={styles.label}>Odometer photo</Text>
       <TouchableOpacity style={styles.photoButton} onPress={showImageOptions} disabled={submitting}>
-        <Text style={styles.photoButtonText}>{photoUri ? 'Change photo' : 'Take / Select photo'}</Text>
+        <Text style={styles.photoButtonText}>{photoUri ? 'Change photo / फोटो बदलें' : 'Take Photo / फोटो लें'}</Text>
       </TouchableOpacity>
       {photoUri ? (
         <Image source={{ uri: photoUri }} style={styles.preview} resizeMode="cover" />

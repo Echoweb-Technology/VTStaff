@@ -5,7 +5,7 @@
  */
 
 import { Platform } from 'react-native';
-import Geolocation from '@react-native-community/geolocation';
+import Geolocation from 'react-native-geolocation-service';
 
 function getCurrentPosition(options) {
   return new Promise((resolve, reject) => {

@@ -84,3 +84,21 @@ export async function resizeImage(uri) {
   );
   return res.uri;
 }
+
+/**
+ * Aggressive compression for low-bandwidth networks (e.g., fuel slips).
+ * Max width 800, 45% JPEG quality.
+ */
+export async function compressImageHeavy(uri) {
+  const res = await ImageResizer.createResizedImage(
+    uri,
+    800,
+    9999,
+    'JPEG',
+    45,
+    0,
+    undefined,
+    false
+  );
+  return res.uri;
+}

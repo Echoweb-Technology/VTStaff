@@ -34,6 +34,23 @@ export async function getDriverStatus() {
 }
 
 /**
+ * GET dashboard slider data.
+ * Returns { status: 200, data: { driver, handover } }
+ */
+export async function getDashboardSlider() {
+  const headers = await getAuthHeaders();
+  const res = await fetch(`${BASE_URL}/slider.php`, { method: 'GET', headers });
+  const json = await res.json();
+  if (res.status === 401) {
+    throw new Error(json.message || 'Unauthorized');
+  }
+  if (res.status !== 200 || (json.status && json.status !== 200)) {
+    throw new Error(json.message || 'Failed to fetch slider');
+  }
+  return json;
+}
+
+/**
  * POST start-duty (multipart/form-data).
  * Fields: odometer_reading, booking_id, user_name, user_phone_no, start_latitude, start_longitude, odometer_photo (file)
  */
@@ -72,6 +89,26 @@ export async function endDuty(formData) {
   if (res.status === 401) throw new Error(json.message || 'Unauthorized');
   if (res.status !== 200 || (json.status && json.status !== 200)) {
     throw new Error(json.message || 'Failed to end duty');
+  }
+  return json;
+}
+
+/**
+ * POST add-fuel (multipart/form-data).
+ */
+export async function addFuel(formData) {
+  const token = await AsyncStorage.getItem(TOKEN_KEY);
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`${BASE_URL}/add-fuel.php`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  const json = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new Error(json.msg || json.message || 'Unauthorized');
+  if (res.status !== 200 || (json.status && json.status !== 200)) {
+    throw new Error(json.msg || json.message || 'Failed to add fuel');
   }
   return json;
 }
